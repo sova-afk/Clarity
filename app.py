@@ -37,6 +37,95 @@ ANSI_BASIC_COLORS = {
     97: "#111111",
 }
 
+TRANSLATIONS = {
+    "en": {
+        "app_title": "MVT GUI Wrapper",
+        "run_configuration": "Run Configuration",
+        "execution": "Execution",
+        "console_logs": "Console Logs",
+        "parsed_report": "Parsed Report",
+        "target_platform": "Target Platform",
+        "workflow": "Workflow",
+        "input": "Input",
+        "backup_path": "Backup Path",
+        "filesystem_path": "Filesystem Dump Path",
+        "adb_path": "ADB Output / Work Folder",
+        "input_path_generic": "Input Path",
+        "ioc_file": "IOC File (optional/required by check)",
+        "output_directory": "Output Directory",
+        "remember_inputs": "Remember these inputs for next launch",
+        "run_mvt": "Run MVT",
+        "stop": "Stop",
+        "clear_logs": "Clear Logs",
+        "settings": "Settings",
+        "open_results": "Open Results Folder",
+        "refresh_report": "Refresh Parsed Report",
+        "export_csv": "Export CSV",
+        "export_html": "Export HTML",
+        "status_idle": "Idle",
+        "status_no_cmd": "No command running",
+        "summary_idle": "Run summary will appear here.",
+        "report_idle": "No parsed report yet.",
+        "no_cmd_queued": "No commands queued",
+        "run_in_progress_title": "Run in progress",
+        "run_in_progress_msg": "A run is already in progress.",
+        "invalid_config_title": "Invalid configuration",
+        "select_input_path": "Please select an input path.",
+        "select_output_dir": "Please select an output directory.",
+        "status_running_bg": "Running MVT in background...",
+        "status_preparing": "Preparing execution",
+        "summary_started": "Run started. Waiting for results...",
+        "settings_title": "Settings",
+        "language_section": "Language",
+        "language_label": "Language",
+        "english": "English",
+        "slovak": "Slovak",
+    },
+    "sk": {
+        "app_title": "MVT GUI Wrapper",
+        "run_configuration": "Konfiguracia analyzy",
+        "execution": "Vykonavanie",
+        "console_logs": "Konzolove logy",
+        "parsed_report": "Parsovany report",
+        "target_platform": "Cielova platforma",
+        "workflow": "Workflow",
+        "input": "Vstup",
+        "backup_path": "Cesta k backupu",
+        "filesystem_path": "Cesta k filesystem dumpu",
+        "adb_path": "ADB vystup / pracovny priecinok",
+        "input_path_generic": "Vstupna cesta",
+        "ioc_file": "IOC subor (volitelny/povinny podla kontroly)",
+        "output_directory": "Output priecinok",
+        "remember_inputs": "Zapamatat vstupy pre dalsie spustenie",
+        "run_mvt": "Spustit MVT",
+        "stop": "Stop",
+        "clear_logs": "Vymazat logy",
+        "settings": "Nastavenia",
+        "open_results": "Otvorit priecinok s vysledkami",
+        "refresh_report": "Obnovit parsovany report",
+        "export_csv": "Export CSV",
+        "export_html": "Export HTML",
+        "status_idle": "Necinne",
+        "status_no_cmd": "Nejde ziaden prikaz",
+        "summary_idle": "Sumar analyzy sa zobrazi tu.",
+        "report_idle": "Zatial nie je parsovany report.",
+        "no_cmd_queued": "Nie su naplanovane ziadne prikazy",
+        "run_in_progress_title": "Analyza prebieha",
+        "run_in_progress_msg": "Jedna analyza uz prebieha.",
+        "invalid_config_title": "Neplatna konfiguracia",
+        "select_input_path": "Vyberte vstupnu cestu.",
+        "select_output_dir": "Vyberte output priecinok.",
+        "status_running_bg": "MVT bezi na pozadi...",
+        "status_preparing": "Pripravujem spustenie",
+        "summary_started": "Analyza spustena. Cakam na vysledky...",
+        "settings_title": "Nastavenia",
+        "language_section": "Jazyk",
+        "language_label": "Jazyk",
+        "english": "Anglictina",
+        "slovak": "Slovencina",
+    },
+}
+
 
 def run_mvt_command_process(command_obj, ipc_queue):
     class QueueWriter:
@@ -103,10 +192,12 @@ class App(tk.Tk):
         self._build_state()
         self._build_ui()
         self._load_preferences()
+        self._apply_language_texts()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._drain_log_queue)
 
     def _build_state(self):
+        self.language_var = tk.StringVar(value="en")
         self.platform_var = tk.StringVar(value="ios")
         self.workflow_var = tk.StringVar(value="backup")
         self.iocs_var = tk.StringVar()
@@ -114,75 +205,85 @@ class App(tk.Tk):
         self.output_dir_var = tk.StringVar()
         self.remember_inputs_var = tk.BooleanVar(value=False)
 
-        self.status_var = tk.StringVar(value="Idle")
-        self.current_cmd_var = tk.StringVar(value="No command running")
-        self.summary_var = tk.StringVar(value="Run summary will appear here.")
+        self.status_var = tk.StringVar(value=self.t("status_idle"))
+        self.current_cmd_var = tk.StringVar(value=self.t("status_no_cmd"))
+        self.summary_var = tk.StringVar(value=self.t("summary_idle"))
         self.progress_var = tk.DoubleVar(value=0.0)
-        self.report_status_var = tk.StringVar(value="No parsed report yet.")
+        self.report_status_var = tk.StringVar(value=self.t("report_idle"))
+
+    def t(self, key):
+        lang = self.language_var.get() if hasattr(self, "language_var") else "en"
+        if lang not in TRANSLATIONS:
+            lang = "en"
+        return TRANSLATIONS[lang].get(key, TRANSLATIONS["en"].get(key, key))
 
     def _build_ui(self):
+        self.title(self.t("app_title"))
         root = ttk.Frame(self, padding=12)
         root.pack(fill=tk.BOTH, expand=True)
         root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
         root.rowconfigure(2, weight=2)
 
-        top = ttk.LabelFrame(root, text="Run Configuration", padding=10)
-        top.grid(row=0, column=0, sticky="nsew")
+        self.top_frame = ttk.LabelFrame(root, text=self.t("run_configuration"), padding=10)
+        self.top_frame.grid(row=0, column=0, sticky="nsew")
         for i in range(3):
-            top.columnconfigure(i, weight=1)
+            self.top_frame.columnconfigure(i, weight=1)
 
-        self._build_platform_section(top)
-        self._build_paths_section(top)
-        self._build_controls_section(top)
+        self._build_platform_section(self.top_frame)
+        self._build_paths_section(self.top_frame)
+        self._build_controls_section(self.top_frame)
 
-        middle = ttk.LabelFrame(root, text="Execution", padding=10)
-        middle.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
-        middle.columnconfigure(0, weight=1)
-        middle.rowconfigure(2, weight=1)
+        self.exec_frame = ttk.LabelFrame(root, text=self.t("execution"), padding=10)
+        self.exec_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.exec_frame.columnconfigure(0, weight=1)
+        self.exec_frame.rowconfigure(2, weight=1)
 
-        ttk.Label(middle, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
-        ttk.Label(middle, textvariable=self.current_cmd_var, foreground="#1d4ed8").grid(
+        ttk.Label(self.exec_frame, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(self.exec_frame, textvariable=self.current_cmd_var, foreground="#1d4ed8").grid(
             row=1, column=0, sticky="w", pady=(5, 6)
         )
         self.progress_bar = ttk.Progressbar(
-            middle, maximum=100, variable=self.progress_var, mode="determinate"
+            self.exec_frame, maximum=100, variable=self.progress_var, mode="determinate"
         )
         self.progress_bar.grid(row=2, column=0, sticky="ew")
 
-        self.command_list = tk.Listbox(middle, height=6)
+        self.command_list = tk.Listbox(self.exec_frame, height=6)
         self.command_list.grid(row=3, column=0, sticky="nsew", pady=(10, 8))
-        self.command_list.insert(tk.END, "No commands queued")
+        self.command_list.insert(tk.END, self.t("no_cmd_queued"))
 
-        output_tabs = ttk.Notebook(root)
-        output_tabs.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        self.output_tabs = ttk.Notebook(root)
+        self.output_tabs.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
 
-        logs_tab = ttk.Frame(output_tabs)
-        logs_tab.columnconfigure(0, weight=1)
-        logs_tab.rowconfigure(0, weight=1)
-        self.log_text = ScrolledText(logs_tab, wrap=tk.WORD, state=tk.DISABLED, height=16)
+        self.logs_tab = ttk.Frame(self.output_tabs)
+        self.logs_tab.columnconfigure(0, weight=1)
+        self.logs_tab.rowconfigure(0, weight=1)
+        self.log_text = ScrolledText(self.logs_tab, wrap=tk.WORD, state=tk.DISABLED, height=16)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         self.log_base_font = tkfont.nametofont(self.log_text.cget("font"))
-        output_tabs.add(logs_tab, text="Console Logs")
+        self.output_tabs.add(self.logs_tab, text=self.t("console_logs"))
 
-        report_tab = ttk.Frame(output_tabs, padding=6)
-        report_tab.columnconfigure(0, weight=1)
-        report_tab.rowconfigure(1, weight=1)
-        report_controls = ttk.Frame(report_tab)
+        self.report_tab = ttk.Frame(self.output_tabs, padding=6)
+        self.report_tab.columnconfigure(0, weight=1)
+        self.report_tab.rowconfigure(1, weight=1)
+        report_controls = ttk.Frame(self.report_tab)
         report_controls.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         report_controls.columnconfigure(0, weight=1)
         ttk.Label(report_controls, textvariable=self.report_status_var).grid(row=0, column=0, sticky="w")
-        ttk.Button(report_controls, text="Refresh Parsed Report", command=self._refresh_report).grid(
+        self.refresh_report_btn = ttk.Button(report_controls, text=self.t("refresh_report"), command=self._refresh_report)
+        self.refresh_report_btn.grid(
             row=0, column=1, sticky="e"
         )
-        ttk.Button(report_controls, text="Export CSV", command=self._export_report_csv).grid(
+        self.export_csv_btn = ttk.Button(report_controls, text=self.t("export_csv"), command=self._export_report_csv)
+        self.export_csv_btn.grid(
             row=0, column=2, sticky="e", padx=(8, 0)
         )
-        ttk.Button(report_controls, text="Export HTML", command=self._export_report_html).grid(
+        self.export_html_btn = ttk.Button(report_controls, text=self.t("export_html"), command=self._export_report_html)
+        self.export_html_btn.grid(
             row=0, column=3, sticky="e", padx=(8, 0)
         )
 
-        report_tree_wrap = ttk.Frame(report_tab)
+        report_tree_wrap = ttk.Frame(self.report_tab)
         report_tree_wrap.grid(row=1, column=0, sticky="nsew")
         report_tree_wrap.columnconfigure(0, weight=1)
         report_tree_wrap.rowconfigure(0, weight=1)
@@ -195,7 +296,7 @@ class App(tk.Tk):
         tree_scroll = ttk.Scrollbar(report_tree_wrap, orient="vertical", command=self.report_tree.yview)
         tree_scroll.grid(row=0, column=1, sticky="ns")
         self.report_tree.configure(yscrollcommand=tree_scroll.set)
-        output_tabs.add(report_tab, text="Parsed Report")
+        self.output_tabs.add(self.report_tab, text=self.t("parsed_report"))
 
         summary_frame = ttk.Frame(root)
         summary_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
@@ -203,7 +304,7 @@ class App(tk.Tk):
 
         ttk.Label(summary_frame, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
         self.open_results_btn = ttk.Button(
-            summary_frame, text="Open Results Folder", command=self._open_results_dir, state=tk.DISABLED
+            summary_frame, text=self.t("open_results"), command=self._open_results_dir, state=tk.DISABLED
         )
         self.open_results_btn.grid(row=0, column=1, sticky="e")
 
@@ -215,17 +316,21 @@ class App(tk.Tk):
         section.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         section.columnconfigure(1, weight=1)
 
-        ttk.Label(section, text="Target Platform").grid(row=0, column=0, sticky="w")
+        self.platform_label = ttk.Label(section, text=self.t("target_platform"))
+        self.platform_label.grid(row=0, column=0, sticky="w")
         platforms = ttk.Frame(section)
         platforms.grid(row=0, column=1, sticky="w")
-        ttk.Radiobutton(
+        self.ios_radio = ttk.Radiobutton(
             platforms, text="iOS", value="ios", variable=self.platform_var, command=self._on_platform_change
-        ).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Radiobutton(
+        )
+        self.ios_radio.pack(side=tk.LEFT, padx=(0, 12))
+        self.android_radio = ttk.Radiobutton(
             platforms, text="Android", value="android", variable=self.platform_var, command=self._on_platform_change
-        ).pack(side=tk.LEFT)
+        )
+        self.android_radio.pack(side=tk.LEFT)
 
-        ttk.Label(section, text="Workflow").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.workflow_label = ttk.Label(section, text=self.t("workflow"))
+        self.workflow_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
         self.workflow_combo = ttk.Combobox(
             section, textvariable=self.workflow_var, state="readonly", width=25
         )
@@ -240,33 +345,42 @@ class App(tk.Tk):
         self.input_label = ttk.Label(section, text="Input")
         self.input_label.grid(row=0, column=0, sticky="w")
         ttk.Entry(section, textvariable=self.input_path_var).grid(row=0, column=1, sticky="ew", padx=8)
-        ttk.Button(section, text="Browse", command=self._browse_input).grid(row=0, column=2, sticky="e")
+        self.browse_input_btn = ttk.Button(section, text="Browse", command=self._browse_input)
+        self.browse_input_btn.grid(row=0, column=2, sticky="e")
 
-        ttk.Label(section, text="IOC File (optional/required by check)").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.ioc_label = ttk.Label(section, text=self.t("ioc_file"))
+        self.ioc_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(section, textvariable=self.iocs_var).grid(row=1, column=1, sticky="ew", padx=8, pady=(10, 0))
-        ttk.Button(section, text="Browse", command=self._browse_iocs).grid(row=1, column=2, sticky="e", pady=(10, 0))
+        self.browse_ioc_btn = ttk.Button(section, text="Browse", command=self._browse_iocs)
+        self.browse_ioc_btn.grid(row=1, column=2, sticky="e", pady=(10, 0))
 
-        ttk.Label(section, text="Output Directory").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        self.output_label = ttk.Label(section, text=self.t("output_directory"))
+        self.output_label.grid(row=2, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(section, textvariable=self.output_dir_var).grid(row=2, column=1, sticky="ew", padx=8, pady=(10, 0))
-        ttk.Button(section, text="Browse", command=self._browse_output).grid(row=2, column=2, sticky="e", pady=(10, 0))
+        self.browse_output_btn = ttk.Button(section, text="Browse", command=self._browse_output)
+        self.browse_output_btn.grid(row=2, column=2, sticky="e", pady=(10, 0))
 
-        ttk.Checkbutton(
+        self.remember_inputs_check = ttk.Checkbutton(
             section,
-            text="Remember these inputs for next launch",
+            text=self.t("remember_inputs"),
             variable=self.remember_inputs_var,
             command=self._save_preferences,
-        ).grid(row=3, column=1, sticky="w", pady=(10, 0))
+        )
+        self.remember_inputs_check.grid(row=3, column=1, sticky="w", pady=(10, 0))
 
     def _build_controls_section(self, parent):
         section = ttk.Frame(parent)
         section.grid(row=0, column=2, sticky="nsew")
         section.columnconfigure(0, weight=1)
 
-        self.run_btn = ttk.Button(section, text="Run MVT", command=self._start_run)
+        self.run_btn = ttk.Button(section, text=self.t("run_mvt"), command=self._start_run)
         self.run_btn.grid(row=0, column=0, sticky="ew")
-        self.stop_btn = ttk.Button(section, text="Stop", command=self._request_stop, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(section, text=self.t("stop"), command=self._request_stop, state=tk.DISABLED)
         self.stop_btn.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(section, text="Clear Logs", command=self._clear_logs).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.clear_logs_btn = ttk.Button(section, text=self.t("clear_logs"), command=self._clear_logs)
+        self.clear_logs_btn.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.settings_btn = ttk.Button(section, text=self.t("settings"), command=self._open_settings)
+        self.settings_btn.grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
     def _on_platform_change(self):
         self._update_workflow_options()
@@ -285,11 +399,11 @@ class App(tk.Tk):
     def _update_input_label(self):
         workflow = self.workflow_var.get()
         label_map = {
-            "backup": "Backup Path",
-            "filesystem": "Filesystem Dump Path",
-            "adb": "ADB Output / Work Folder",
+            "backup": self.t("backup_path"),
+            "filesystem": self.t("filesystem_path"),
+            "adb": self.t("adb_path"),
         }
-        self.input_label.config(text=label_map.get(workflow, "Input Path"))
+        self.input_label.config(text=label_map.get(workflow, self.t("input_path_generic")))
 
     def _browse_input(self):
         selected = filedialog.askdirectory(title="Select Input Folder")
@@ -309,6 +423,47 @@ class App(tk.Tk):
         if selected:
             self.output_dir_var.set(selected)
 
+    def _open_settings(self):
+        if hasattr(self, "settings_window") and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            self.settings_window.focus_force()
+            return
+
+        self.settings_window = tk.Toplevel(self)
+        self.settings_window.title(self.t("settings_title"))
+        self.settings_window.geometry("360x160")
+        self.settings_window.resizable(False, False)
+        container = ttk.Frame(self.settings_window, padding=12)
+        container.pack(fill=tk.BOTH, expand=True)
+        container.columnconfigure(1, weight=1)
+
+        section = ttk.LabelFrame(container, text=self.t("language_section"), padding=10)
+        section.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        section.columnconfigure(1, weight=1)
+        ttk.Label(section, text=self.t("language_label")).grid(row=0, column=0, sticky="w")
+
+        current = "English" if self.language_var.get() == "en" else "Slovencina"
+        self.settings_language_display_var = tk.StringVar(value=current)
+        self.settings_language_combo = ttk.Combobox(
+            section,
+            textvariable=self.settings_language_display_var,
+            state="readonly",
+            values=["English", "Slovencina"],
+            width=20,
+        )
+        self.settings_language_combo.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.settings_language_combo.bind("<<ComboboxSelected>>", self._on_language_changed)
+
+    def _on_language_changed(self, _event=None):
+        if self.is_running:
+            messagebox.showwarning(self.t("run_in_progress_title"), self.t("run_in_progress_msg"))
+            return
+
+        selected = self.settings_language_display_var.get()
+        self.language_var.set("sk" if selected == "Slovencina" else "en")
+        self._save_preferences()
+        self._apply_language_texts()
+
     def _build_commands(self):
         platform = self.platform_var.get()
         workflow = self.workflow_var.get()
@@ -317,9 +472,9 @@ class App(tk.Tk):
         iocs = self.iocs_var.get().strip()
 
         if workflow != "adb" and not input_path:
-            raise ValueError("Please select an input path.")
+            raise ValueError(self.t("select_input_path"))
         if not output_dir:
-            raise ValueError("Please select an output directory.")
+            raise ValueError(self.t("select_output_dir"))
 
         if workflow != "adb" and not Path(input_path).exists():
             raise ValueError(f"Input path does not exist: {input_path}")
@@ -365,13 +520,13 @@ class App(tk.Tk):
 
     def _start_run(self):
         if self.is_running:
-            messagebox.showwarning("Run in progress", "A run is already in progress.")
+            messagebox.showwarning(self.t("run_in_progress_title"), self.t("run_in_progress_msg"))
             return
 
         try:
             commands, output_dir = self._build_commands()
         except Exception as exc:
-            messagebox.showerror("Invalid configuration", str(exc))
+            messagebox.showerror(self.t("invalid_config_title"), str(exc))
             return
 
         self.last_output_dir = output_dir
@@ -386,9 +541,9 @@ class App(tk.Tk):
         self.is_running = True
         self.run_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self.status_var.set("Running MVT in background...")
-        self.current_cmd_var.set("Preparing execution")
-        self.summary_var.set("Run started. Waiting for results...")
+        self.status_var.set(self.t("status_running_bg"))
+        self.current_cmd_var.set(self.t("status_preparing"))
+        self.summary_var.set(self.t("summary_started"))
         self._append_log(f"Starting run with {len(commands)} command(s)\n")
 
         self.worker_thread = threading.Thread(
@@ -797,6 +952,41 @@ class App(tk.Tk):
         text = str(value)
         return text[:200] + ("..." if len(text) > 200 else "")
 
+    def _apply_language_texts(self):
+        self.title(self.t("app_title"))
+        self.top_frame.config(text=self.t("run_configuration"))
+        self.exec_frame.config(text=self.t("execution"))
+        self.output_tabs.tab(self.logs_tab, text=self.t("console_logs"))
+        self.output_tabs.tab(self.report_tab, text=self.t("parsed_report"))
+        self.platform_label.config(text=self.t("target_platform"))
+        self.workflow_label.config(text=self.t("workflow"))
+        self.ioc_label.config(text=self.t("ioc_file"))
+        self.output_label.config(text=self.t("output_directory"))
+        self.remember_inputs_check.config(text=self.t("remember_inputs"))
+        self.run_btn.config(text=self.t("run_mvt"))
+        self.stop_btn.config(text=self.t("stop"))
+        self.clear_logs_btn.config(text=self.t("clear_logs"))
+        self.settings_btn.config(text=self.t("settings"))
+        self.refresh_report_btn.config(text=self.t("refresh_report"))
+        self.export_csv_btn.config(text=self.t("export_csv"))
+        self.export_html_btn.config(text=self.t("export_html"))
+        self.open_results_btn.config(text=self.t("open_results"))
+        if self.status_var.get() in ("Idle", "Necinne"):
+            self.status_var.set(self.t("status_idle"))
+        if self.current_cmd_var.get() in ("No command running", "Nejde ziaden prikaz"):
+            self.current_cmd_var.set(self.t("status_no_cmd"))
+        if self.summary_var.get() in ("Run summary will appear here.", "Sumar analyzy sa zobrazi tu."):
+            self.summary_var.set(self.t("summary_idle"))
+        if self.report_status_var.get() in ("No parsed report yet.", "Zatial nie je parsovany report."):
+            self.report_status_var.set(self.t("report_idle"))
+        if self.command_list.size() == 1 and self.command_list.get(0) in (
+            "No commands queued",
+            "Nie su naplanovane ziadne prikazy",
+        ):
+            self.command_list.delete(0, tk.END)
+            self.command_list.insert(tk.END, self.t("no_cmd_queued"))
+        self._update_input_label()
+
     def _open_results_dir(self):
         if not self.last_output_dir:
             messagebox.showinfo("No output", "No results directory is available yet.")
@@ -818,6 +1008,7 @@ class App(tk.Tk):
             return
 
         remember = bool(data.get("remember_inputs", False))
+        self.language_var.set(data.get("language", "en"))
         self.remember_inputs_var.set(remember)
         if not remember:
             return
@@ -832,7 +1023,7 @@ class App(tk.Tk):
         self.iocs_var.set(data.get("iocs_path", ""))
 
     def _save_preferences(self):
-        payload = {"remember_inputs": bool(self.remember_inputs_var.get())}
+        payload = {"remember_inputs": bool(self.remember_inputs_var.get()), "language": self.language_var.get()}
         if self.remember_inputs_var.get():
             payload.update(
                 {
