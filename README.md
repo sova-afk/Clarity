@@ -40,6 +40,7 @@ Why this stack:
   - timestamped result folder per run
   - button to open results folder in Explorer
   - parsed JSON report tab (table view across output JSON files)
+  - export parsed report to CSV and HTML
 - UX helpers:
   - remembers paths/platform/workflow if enabled
   - ANSI log formatting support
@@ -49,7 +50,7 @@ Why this stack:
 
 - Full coverage of every MVT command and advanced options
 - Built-in packaging to `.exe` (can be added with PyInstaller)
-- Exporting parsed report tables to CSV/PDF
+- Exporting parsed report tables to PDF
 
 ## Requirements
 
@@ -110,5 +111,4 @@ If compromise is strongly suspected, consult professional incident response/fore
 ## Next Steps (Suggested)
 
 - Add per-workflow advanced options in GUI (module filters, verbose mode, etc.)
-- Add exportable parsed run report (CSV/HTML)
 - Package as standalone Windows executable

@@ -1,3 +1,4 @@
+import csv
 import json
 import multiprocessing as mp
 import os
@@ -13,6 +14,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
+from html import escape
 
 ANSI_TOKEN_RE = re.compile(r"(\x1b\[[0-?]*[ -/]*[@-~])")
 URL_RE = re.compile(r"https?://[^\s<>'\"()]+")
@@ -172,6 +174,12 @@ class App(tk.Tk):
         ttk.Label(report_controls, textvariable=self.report_status_var).grid(row=0, column=0, sticky="w")
         ttk.Button(report_controls, text="Refresh Parsed Report", command=self._refresh_report).grid(
             row=0, column=1, sticky="e"
+        )
+        ttk.Button(report_controls, text="Export CSV", command=self._export_report_csv).grid(
+            row=0, column=2, sticky="e", padx=(8, 0)
+        )
+        ttk.Button(report_controls, text="Export HTML", command=self._export_report_html).grid(
+            row=0, column=3, sticky="e", padx=(8, 0)
         )
 
         report_tree_wrap = ttk.Frame(report_tab)
@@ -638,6 +646,70 @@ class App(tk.Tk):
             messagebox.showinfo("No output", "Run MVT first so there is an output directory to parse.")
             return
         self._load_parsed_report(self.last_output_dir)
+
+    def _export_report_csv(self):
+        rows = self._collect_report_rows()
+        if not rows:
+            messagebox.showinfo("No report data", "There is no parsed report data to export.")
+            return
+        output_path = filedialog.asksaveasfilename(
+            title="Export Parsed Report (CSV)",
+            defaultextension=".csv",
+            initialfile="mvt_parsed_report.csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not output_path:
+            return
+        try:
+            with open(output_path, "w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["file", "item", "severity", "module", "indicator", "value"])
+                writer.writerows(rows)
+            messagebox.showinfo("Export complete", f"CSV exported to:\n{output_path}")
+        except Exception as exc:
+            messagebox.showerror("Export failed", f"Could not export CSV:\n{exc}")
+
+    def _export_report_html(self):
+        rows = self._collect_report_rows()
+        if not rows:
+            messagebox.showinfo("No report data", "There is no parsed report data to export.")
+            return
+        output_path = filedialog.asksaveasfilename(
+            title="Export Parsed Report (HTML)",
+            defaultextension=".html",
+            initialfile="mvt_parsed_report.html",
+            filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
+        )
+        if not output_path:
+            return
+        try:
+            html = [
+                "<!doctype html>",
+                "<html><head><meta charset='utf-8'><title>MVT Parsed Report</title>",
+                "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:20px;}table{border-collapse:collapse;width:100%;}"
+                "th,td{border:1px solid #d0d0d0;padding:6px;vertical-align:top;font-size:13px;}th{background:#f1f5f9;text-align:left;}</style>",
+                "</head><body>",
+                "<h2>MVT Parsed Report</h2>",
+                "<table><thead><tr><th>File</th><th>Item</th><th>Severity</th><th>Module</th><th>Indicator</th><th>Value</th></tr></thead><tbody>",
+            ]
+            for row in rows:
+                html.append(
+                    "<tr>"
+                    + "".join(f"<td>{escape(str(cell))}</td>" for cell in row)
+                    + "</tr>"
+                )
+            html.append("</tbody></table></body></html>")
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(html))
+            messagebox.showinfo("Export complete", f"HTML exported to:\n{output_path}")
+        except Exception as exc:
+            messagebox.showerror("Export failed", f"Could not export HTML:\n{exc}")
+
+    def _collect_report_rows(self):
+        rows = []
+        for item_id in self.report_tree.get_children():
+            rows.append(self.report_tree.item(item_id, "values"))
+        return rows
 
     def _load_parsed_report(self, output_dir):
         self.report_tree.delete(*self.report_tree.get_children())
