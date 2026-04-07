@@ -35,9 +35,11 @@ Why this stack:
   - progress bar (best-effort from output parsing)
   - live logs/console output
   - success/error summary
+  - stop/cancel running job
 - Output handling:
   - timestamped result folder per run
   - button to open results folder in Explorer
+  - parsed JSON report tab (table view across output JSON files)
 - UX helpers:
   - remembers paths/platform/workflow if enabled
   - ANSI log formatting support
@@ -47,8 +49,7 @@ Why this stack:
 
 - Full coverage of every MVT command and advanced options
 - Built-in packaging to `.exe` (can be added with PyInstaller)
-- Deep parsing of MVT JSON outputs into rich GUI tables/reports
-- Job cancellation/stop button
+- Exporting parsed report tables to CSV/PDF
 
 ## Requirements
 
@@ -99,6 +100,7 @@ run.bat
 - Progress is estimated from log output patterns; not every module reports percentages.
 - Some MVT modules may report "no data to extract" depending on acquisition type/content.
 - GUI behavior depends on MVT package behavior/version.
+- Parsed report is schema-agnostic and best-effort (different MVT modules produce different JSON formats).
 
 ## Security / Forensics Note
 
@@ -108,6 +110,5 @@ If compromise is strongly suspected, consult professional incident response/fore
 ## Next Steps (Suggested)
 
 - Add per-workflow advanced options in GUI (module filters, verbose mode, etc.)
-- Add run cancel button
-- Add exportable run report
+- Add exportable parsed run report (CSV/HTML)
 - Package as standalone Windows executable

@@ -1,8 +1,10 @@
 import json
+import multiprocessing as mp
 import os
 import queue
 import re
 import threading
+import time
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
@@ -34,6 +36,50 @@ ANSI_BASIC_COLORS = {
 }
 
 
+def run_mvt_command_process(command_obj, ipc_queue):
+    class QueueWriter:
+        def __init__(self, out_queue):
+            self.out_queue = out_queue
+            self._buffer = ""
+
+        def write(self, data):
+            if not data:
+                return 0
+            self._buffer += data
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                self.out_queue.put(("line", line + "\n"))
+            return len(data)
+
+        def flush(self):
+            if self._buffer:
+                self.out_queue.put(("line", self._buffer))
+                self._buffer = ""
+
+    writer = QueueWriter(ipc_queue)
+    args = command_obj["args"]
+    platform = command_obj["platform"]
+    try:
+        if platform == "ios":
+            from mvt.ios.cli import cli as mvt_cli
+            prog_name = "mvt-ios"
+        else:
+            from mvt.android.cli import cli as mvt_cli
+            prog_name = "mvt-android"
+
+        with redirect_stdout(writer), redirect_stderr(writer):
+            mvt_cli.main(args=args, prog_name=prog_name, standalone_mode=False)
+        writer.flush()
+        ipc_queue.put(("exit", 0))
+    except SystemExit as exc:
+        writer.flush()
+        ipc_queue.put(("exit", int(exc.code) if isinstance(exc.code, int) else 1))
+    except Exception as exc:
+        writer.flush()
+        ipc_queue.put(("line", f"ERROR: MVT library call failed: {exc}\n"))
+        ipc_queue.put(("exit", 1))
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -43,6 +89,8 @@ class App(tk.Tk):
 
         self.log_queue = queue.Queue()
         self.worker_thread = None
+        self.active_process = None
+        self.stop_requested = False
         self.is_running = False
         self.last_output_dir = None
         self.ansi_state = {"fg": None, "bold": False, "underline": False, "dim": False}
@@ -68,6 +116,7 @@ class App(tk.Tk):
         self.current_cmd_var = tk.StringVar(value="No command running")
         self.summary_var = tk.StringVar(value="Run summary will appear here.")
         self.progress_var = tk.DoubleVar(value=0.0)
+        self.report_status_var = tk.StringVar(value="No parsed report yet.")
 
     def _build_ui(self):
         root = ttk.Frame(self, padding=12)
@@ -103,14 +152,42 @@ class App(tk.Tk):
         self.command_list.grid(row=3, column=0, sticky="nsew", pady=(10, 8))
         self.command_list.insert(tk.END, "No commands queued")
 
-        logs = ttk.LabelFrame(root, text="Console Logs / Output", padding=10)
-        logs.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
-        logs.columnconfigure(0, weight=1)
-        logs.rowconfigure(0, weight=1)
+        output_tabs = ttk.Notebook(root)
+        output_tabs.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
 
-        self.log_text = ScrolledText(logs, wrap=tk.WORD, state=tk.DISABLED, height=16)
+        logs_tab = ttk.Frame(output_tabs)
+        logs_tab.columnconfigure(0, weight=1)
+        logs_tab.rowconfigure(0, weight=1)
+        self.log_text = ScrolledText(logs_tab, wrap=tk.WORD, state=tk.DISABLED, height=16)
         self.log_text.grid(row=0, column=0, sticky="nsew")
         self.log_base_font = tkfont.nametofont(self.log_text.cget("font"))
+        output_tabs.add(logs_tab, text="Console Logs")
+
+        report_tab = ttk.Frame(output_tabs, padding=6)
+        report_tab.columnconfigure(0, weight=1)
+        report_tab.rowconfigure(1, weight=1)
+        report_controls = ttk.Frame(report_tab)
+        report_controls.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        report_controls.columnconfigure(0, weight=1)
+        ttk.Label(report_controls, textvariable=self.report_status_var).grid(row=0, column=0, sticky="w")
+        ttk.Button(report_controls, text="Refresh Parsed Report", command=self._refresh_report).grid(
+            row=0, column=1, sticky="e"
+        )
+
+        report_tree_wrap = ttk.Frame(report_tab)
+        report_tree_wrap.grid(row=1, column=0, sticky="nsew")
+        report_tree_wrap.columnconfigure(0, weight=1)
+        report_tree_wrap.rowconfigure(0, weight=1)
+        columns = ("file", "item", "severity", "module", "indicator", "value")
+        self.report_tree = ttk.Treeview(report_tree_wrap, columns=columns, show="headings", height=10)
+        for col, width in [("file", 250), ("item", 60), ("severity", 90), ("module", 140), ("indicator", 220), ("value", 320)]:
+            self.report_tree.heading(col, text=col.title())
+            self.report_tree.column(col, width=width, anchor="w")
+        self.report_tree.grid(row=0, column=0, sticky="nsew")
+        tree_scroll = ttk.Scrollbar(report_tree_wrap, orient="vertical", command=self.report_tree.yview)
+        tree_scroll.grid(row=0, column=1, sticky="ns")
+        self.report_tree.configure(yscrollcommand=tree_scroll.set)
+        output_tabs.add(report_tab, text="Parsed Report")
 
         summary_frame = ttk.Frame(root)
         summary_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
@@ -179,7 +256,9 @@ class App(tk.Tk):
 
         self.run_btn = ttk.Button(section, text="Run MVT", command=self._start_run)
         self.run_btn.grid(row=0, column=0, sticky="ew")
-        ttk.Button(section, text="Clear Logs", command=self._clear_logs).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.stop_btn = ttk.Button(section, text="Stop", command=self._request_stop, state=tk.DISABLED)
+        self.stop_btn.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(section, text="Clear Logs", command=self._clear_logs).grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
     def _on_platform_change(self):
         self._update_workflow_options()
@@ -229,12 +308,12 @@ class App(tk.Tk):
         output_dir = self.output_dir_var.get().strip()
         iocs = self.iocs_var.get().strip()
 
-        if not input_path:
+        if workflow != "adb" and not input_path:
             raise ValueError("Please select an input path.")
         if not output_dir:
             raise ValueError("Please select an output directory.")
 
-        if not Path(input_path).exists():
+        if workflow != "adb" and not Path(input_path).exists():
             raise ValueError(f"Input path does not exist: {input_path}")
 
         output_target = Path(output_dir) / f"mvt_{platform}_{workflow}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -295,8 +374,10 @@ class App(tk.Tk):
             self.command_list.insert(tk.END, "Queued: " + " ".join(cmd["display"]))
 
         self.open_results_btn.config(state=tk.DISABLED)
+        self.stop_requested = False
         self.is_running = True
         self.run_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
         self.status_var.set("Running MVT in background...")
         self.current_cmd_var.set("Preparing execution")
         self.summary_var.set("Run started. Waiting for results...")
@@ -312,12 +393,20 @@ class App(tk.Tk):
         summaries = []
 
         for idx, cmd in enumerate(commands, start=1):
+            if self.stop_requested:
+                overall_success = False
+                summaries.append("Run cancelled by user")
+                break
             self.log_queue.put(("status", f"Running command {idx}/{len(commands)}"))
             self.log_queue.put(("command", " ".join(cmd["display"])))
             self.log_queue.put(("line", f"\n$ {' '.join(cmd['display'])}\n"))
 
             return_code = self._run_mvt_library_command(cmd, idx, len(commands))
             self.log_queue.put(("progress", (idx / len(commands)) * 100))
+            if return_code == -15:
+                overall_success = False
+                summaries.append(f"Command {idx}: cancelled")
+                break
 
             if return_code == 0:
                 self.log_queue.put(("line", f"SUCCESS: command {idx} finished.\n"))
@@ -327,62 +416,50 @@ class App(tk.Tk):
                 self.log_queue.put(("line", f"ERROR: command {idx} failed with exit code {return_code}.\n"))
                 summaries.append(f"Command {idx}: failed ({return_code})")
 
-        final_status = "success" if overall_success else "error"
+        final_status = "success" if overall_success else ("cancelled" if self.stop_requested else "error")
         summary_text = (
             f"Platform: {self.platform_var.get()}, Workflow: {self.workflow_var.get()}, "
-            f"Commands: {len(commands)}, Result: {'Success' if overall_success else 'Completed with errors'}, "
+            f"Commands: {len(commands)}, Result: {'Success' if overall_success else ('Cancelled' if self.stop_requested else 'Completed with errors')}, "
             f"Output: {output_dir}, Details: {', '.join(summaries)}"
         )
         self.log_queue.put(("done", final_status, summary_text, output_dir))
 
     def _run_mvt_library_command(self, command_obj, idx, total):
-        class QueueWriter:
-            def __init__(self, outer):
-                self.outer = outer
-                self._buffer = ""
-
-            def write(self, data):
-                if not data:
-                    return 0
-                self._buffer += data
-                while "\n" in self._buffer:
-                    line, self._buffer = self._buffer.split("\n", 1)
-                    self.outer.log_queue.put(("line", line + "\n"))
-                    pct_match = re.search(r"(\d{1,3})%", line)
-                    if pct_match:
-                        pct = min(100, max(0, int(pct_match.group(1))))
-                        scaled = ((idx - 1) / total) * 100 + (pct / total)
-                        self.outer.log_queue.put(("progress", scaled))
-                return len(data)
-
-            def flush(self):
-                if self._buffer:
-                    self.outer.log_queue.put(("line", self._buffer))
-                    self._buffer = ""
-
-        writer = QueueWriter(self)
-        args = command_obj["args"]
-        platform = command_obj["platform"]
-
-        try:
-            if platform == "ios":
-                from mvt.ios.cli import cli as mvt_cli
-                prog_name = "mvt-ios"
-            else:
-                from mvt.android.cli import cli as mvt_cli
-                prog_name = "mvt-android"
-
-            with redirect_stdout(writer), redirect_stderr(writer):
-                mvt_cli.main(args=args, prog_name=prog_name, standalone_mode=False)
-            writer.flush()
-            return 0
-        except SystemExit as exc:
-            writer.flush()
-            return int(exc.code) if isinstance(exc.code, int) else 1
-        except Exception as exc:
-            writer.flush()
-            self.log_queue.put(("line", f"ERROR: MVT library call failed: {exc}\n"))
-            return 1
+        ipc_queue = mp.Queue()
+        proc = mp.Process(target=run_mvt_command_process, args=(command_obj, ipc_queue), daemon=True)
+        proc.start()
+        self.active_process = proc
+        exit_code = None
+        while True:
+            if self.stop_requested and proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+                self.log_queue.put(("line", "Run cancelled by user.\n"))
+                exit_code = -15
+                break
+            try:
+                msg = ipc_queue.get(timeout=0.2)
+            except queue.Empty:
+                if not proc.is_alive() and exit_code is None:
+                    break
+                continue
+            kind = msg[0]
+            if kind == "line":
+                line = msg[1]
+                self.log_queue.put(("line", line))
+                pct_match = re.search(r"(\d{1,3})%", line)
+                if pct_match:
+                    pct = min(100, max(0, int(pct_match.group(1))))
+                    scaled = ((idx - 1) / total) * 100 + (pct / total)
+                    self.log_queue.put(("progress", scaled))
+            elif kind == "exit":
+                exit_code = msg[1]
+                break
+        if proc.is_alive():
+            proc.terminate()
+        proc.join(timeout=1)
+        self.active_process = None
+        return 1 if exit_code is None else exit_code
 
     def _drain_log_queue(self):
         try:
@@ -407,6 +484,7 @@ class App(tk.Tk):
     def _handle_run_finished(self, status, summary_text, output_dir):
         self.is_running = False
         self.run_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
         self.current_cmd_var.set("No command running")
         self.summary_var.set(summary_text)
 
@@ -414,7 +492,14 @@ class App(tk.Tk):
             self.status_var.set("Run completed successfully")
             self._append_log(f"\nAll commands completed. Results stored in: {output_dir}\n")
             self.open_results_btn.config(state=tk.NORMAL)
+            self._load_parsed_report(output_dir)
             messagebox.showinfo("MVT finished", f"Completed successfully.\nResults:\n{output_dir}")
+        elif status == "cancelled":
+            self.status_var.set("Run cancelled")
+            self._append_log(f"\nRun cancelled. Partial output (if any): {output_dir}\n")
+            self.open_results_btn.config(state=tk.NORMAL if Path(output_dir).exists() else tk.DISABLED)
+            self._load_parsed_report(output_dir)
+            messagebox.showinfo("MVT cancelled", f"Run was cancelled.\nOutput:\n{output_dir}")
         else:
             self.status_var.set("Run completed with errors")
             self._append_log(f"\nRun finished with errors. Check logs. Output folder: {output_dir}\n")
@@ -422,6 +507,7 @@ class App(tk.Tk):
                 self.open_results_btn.config(state=tk.NORMAL)
             else:
                 self.open_results_btn.config(state=tk.DISABLED)
+            self._load_parsed_report(output_dir)
             messagebox.showwarning("MVT finished with errors", f"Some commands failed.\nOutput:\n{output_dir}")
 
     def _append_log(self, text):
@@ -539,6 +625,105 @@ class App(tk.Tk):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
+
+    def _request_stop(self):
+        if not self.is_running:
+            return
+        self.stop_requested = True
+        self.status_var.set("Cancellation requested...")
+        self._append_log("Cancellation requested by user.\n")
+
+    def _refresh_report(self):
+        if not self.last_output_dir:
+            messagebox.showinfo("No output", "Run MVT first so there is an output directory to parse.")
+            return
+        self._load_parsed_report(self.last_output_dir)
+
+    def _load_parsed_report(self, output_dir):
+        self.report_tree.delete(*self.report_tree.get_children())
+        out_path = Path(output_dir)
+        if not out_path.exists():
+            self.report_status_var.set("Output directory not found.")
+            return
+
+        json_files = list(out_path.rglob("*.json"))
+        rows = 0
+        parse_errors = 0
+        for json_file in json_files:
+            try:
+                with json_file.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                parse_errors += 1
+                continue
+            rows += self._insert_rows_from_payload(out_path, json_file, payload)
+        self.report_status_var.set(
+            f"Parsed {len(json_files)} JSON files, {rows} table rows, {parse_errors} parse errors."
+        )
+
+    def _insert_rows_from_payload(self, base_path, json_file, payload):
+        rel_file = str(json_file.relative_to(base_path))
+        rows = 0
+        if isinstance(payload, list):
+            for idx, item in enumerate(payload):
+                self._insert_report_row(rel_file, idx, item)
+                rows += 1
+        elif isinstance(payload, dict):
+            # If dict has list-like data sections, prefer those for richer rows.
+            inserted = False
+            for key, val in payload.items():
+                if isinstance(val, list):
+                    for idx, item in enumerate(val):
+                        self._insert_report_row(rel_file, f"{key}[{idx}]", item)
+                        rows += 1
+                    inserted = True
+            if not inserted:
+                self._insert_report_row(rel_file, 0, payload)
+                rows += 1
+        else:
+            self.report_tree.insert("", "end", values=(rel_file, 0, "", "", "", str(payload)))
+            rows += 1
+        return rows
+
+    def _insert_report_row(self, rel_file, item_index, item):
+        if not isinstance(item, dict):
+            self.report_tree.insert("", "end", values=(rel_file, item_index, "", "", "", str(item)))
+            return
+
+        severity = self._pick_first(item, ["severity", "level", "status", "detected", "is_suspicious"])
+        module = self._pick_first(item, ["module", "module_name", "parser", "source"])
+        indicator = self._pick_first(item, ["indicator", "ioc", "pattern", "domain", "url", "process_name", "name"])
+        value = self._pick_first(
+            item,
+            ["value", "match", "matched", "path", "text", "sha256", "md5", "package_name", "app", "message"],
+        )
+        self.report_tree.insert(
+            "",
+            "end",
+            values=(
+                rel_file,
+                item_index,
+                self._safe_str(severity),
+                self._safe_str(module),
+                self._safe_str(indicator),
+                self._safe_str(value),
+            ),
+        )
+
+    @staticmethod
+    def _pick_first(data, keys):
+        for key in keys:
+            if key in data and data[key] not in (None, ""):
+                return data[key]
+        return ""
+
+    @staticmethod
+    def _safe_str(value):
+        if isinstance(value, (dict, list)):
+            as_text = json.dumps(value, ensure_ascii=False)
+            return as_text[:200] + ("..." if len(as_text) > 200 else "")
+        text = str(value)
+        return text[:200] + ("..." if len(text) > 200 else "")
 
     def _open_results_dir(self):
         if not self.last_output_dir:
