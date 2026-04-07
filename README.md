@@ -61,7 +61,6 @@ Why this stack:
 ## Not Implemented (Current Scope)
 
 - Full coverage of every MVT command and advanced options
-- Built-in packaging to `.exe` (can be added with PyInstaller)
 - Exporting parsed report tables to PDF
 
 ## Requirements
@@ -78,13 +77,19 @@ pip install -r requirements.txt
 
 ## Run on Windows
 
-Option A:
+Option A (recommended, installer build from GitHub):
+
+1. Download the latest installer (`setup.exe`) from the GitHub repository releases/assets.
+2. Run the installer and complete setup.
+3. Launch **MVT - Graphical Interface** from Start Menu or desktop shortcut.
+
+Option B (if you run from source):
 
 ```bash
 python app.py
 ```
 
-Option B (if you use the included batch script):
+Option C (if you use the included batch script):
 
 ```bat
 run.bat
@@ -123,4 +128,3 @@ If compromise is strongly suspected, consult professional incident response/fore
 ## Next Steps (Suggested)
 
 - Add per-workflow advanced options in GUI (module filters, verbose mode, etc.)
-- Package as standalone Windows executable
