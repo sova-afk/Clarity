@@ -1,4 +1,4 @@
-# MVT GUI Wrapper (Windows)
+# Clarity
 
 Simple desktop GUI wrapper for [Mobile Verification Toolkit (MVT)](https://docs.mvt.re/en/latest/) built with Python + Tkinter.
 
