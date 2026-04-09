@@ -79,9 +79,9 @@ pip install -r requirements.txt
 
 Option A (recommended, installer build from GitHub):
 
-1. Download the latest installer (`setup.exe`) from the GitHub repository releases/assets.
+1. Download the latest installer (`clarity_v0.2_installer.exe`) from the GitHub repository releases/assets.
 2. Run the installer and complete setup.
-3. Launch **MVT - Graphical Interface** from Start Menu or desktop shortcut.
+3. Launch **Clarity** from Start Menu or desktop shortcut.
 
 Option B (if you run from source):
 
